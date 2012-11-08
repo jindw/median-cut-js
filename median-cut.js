@@ -26,353 +26,427 @@
 //  
 //  4. Repeat the above process until the original color space has been divided
 //     into N regions where N is the number of colors you want.
+//	
 
-var MEDIAN_CUT_DEBUG = true;
-
-var MedianCut = function() {
-
-    var boxes,
-
-    init = function( _data ) {
-
-        var box1 = Box();
-        box1.init( _data );
-
-        boxes = [ box1 ];
-
-    },
-
-    get_longest_box_index = function() {
-
-        // find the box with the longest axis of them all...
-        var longest_box_index = 0,
-            box_index;
-
-        for( box_index = boxes.length - 1; box_index >= 0; --box_index ) {
-            if( boxes[ box_index ] > longest_box_index ) {
-                longest_box_index = boxes[ box_index ];
+var ColorSpace = require('./colorspace');
+/**
+ * @param data: rgba list
+ */
+function Palette(data,width) {
+	var i=0;
+	var len = data.length;
+	var height = len/4/width;
+	var rows = [];
+	var hitMap = {}
+	var data2 = [];
+    for (var y = 0; y < height; y++) {
+    	var row = [];
+        for (var x = 0; x < width; x++) {
+            var idx = (width * y + x) << 2;
+            var rgba = data.slice(idx,idx+4);
+            var lab = ColorSpace.rgb2lab(rgba);
+            var key = lab.join(',');
+            if(key in hitMap){
+            	hitMap[key]++;
+            }else{
+            	hitMap[key] = 1;
+            	data2.push(lab)
             }
+            row.push(lab);
         }
-
-        return longest_box_index;
-
-    },
-
-    get_boxes = function() {
-        return boxes;
-    },
-
-    get_dynamic_size_palette = function( _threshold ) {
-
-        // threshold is a value in (0,1] that influences how many colors
-        // will be in the resulting palette.  lower values of threshold
-        // will result in a smaller palette size.
-
-        var values = [],
-            i,
-            longest_box_index = get_longest_box_index(),
-            longest_axis      = boxes[ longest_box_index ].get_longest_axis(),
-            max_box_length    = longest_axis.length * ( 1 - _threshold ),
-            box_to_split,
-            split_boxes,
-            box1,
-            box2,
-            i;
-
-        do {
-
-            // remove the longest box and split it
-            box_to_split = boxes.splice( longest_box_index, 1 )[0];
-            split_boxes = box_to_split.split();
-            box1 = split_boxes[0];
-            box2 = split_boxes[1];
-
-            // then push the resulting boxes into the boxes array
-            boxes.push( box1 );
-            boxes.push( box2 );
-
-            longest_box_index = get_longest_box_index()
-            longest_axis      = boxes[ longest_box_index ].get_longest_axis();
-
-        }
-        while( longest_axis.length > max_box_length );
-
-        // palette is complete.  get the average colors from each box
-        // and push them into the values array, then return.
-        for( i = boxes.length - 1; i >= 0; --i ) {
-            values.push( boxes[i].average() );
-        }
-
-        return values;
-
-    },
-
-    get_fixed_size_palette = function( _number ) {
-
-        var values = [],
-            i,
-            box_to_split,
-            split_boxes,
-            box1,
-            box2;
-
-        for( i = _number - 1; i >= 0; --i ) {
-
-            longest_box_index = get_longest_box_index();
-
-            // remove the longest box and split it
-            box_to_split = boxes.splice( longest_box_index, 1 )[0];
-            split_boxes = box_to_split.split();
-            box1 = split_boxes[0];
-            box2 = split_boxes[1];
-
-            // then push the resulting boxes into the boxes array
-            boxes.push( box1 );
-            boxes.push( box2 );
-        }
-
-        // palette is complete.  get the average colors from each box
-        // and push them into the values array, then return.
-        for( i = _number - 1; i >= 0; --i ) {
-            values.push( boxes[i].average() );
-        }
-
-        return values;
-
-    };
-
-    return {
-        // This is a private function (listed here in case it needs to be made 
-        // public easily :) 
-
-        //get_boxes                : get_boxes
-
-        // These are exposed (public) functions
-        init                     : init,
-        get_fixed_size_palette   : get_fixed_size_palette,
-        get_dynamic_size_palette : get_dynamic_size_palette,
-    };
+        rows.push(row);
+    }
+    console.log("color count:",data2.length)
+    var boxes = this.boxes = [new Box(data2,this)];
+    //2/64
+    //常见像素细分: 频率优先级中位切分.
+    this.minLength = 2
+    //最大间隙切分: 最大间隙, 确保不把相差太大的颜色合在一起,貌似没什么用
+    this.maxLength = 16
+    //最小灰度切分: 最大灰度, 常见渐变.
+//    this.minLightLen = 2;
+//    this.maxLightLen = 128;
+    //最大颜色跨度切分,作用在与优化性能?
+    splitByGap(this.boxes,this.maxLength);
+    console.log('gap split count:',boxes.length);//,boxes.join('\n'))
+    var weightMap = this.weightMap =  buildWeightMap(hitMap,3,128,0.5,0,5)
+	var i=boxes.length;
+    while(i--){
+		var box = boxes[i];
+		splitBoxByWeight(box,boxes);
+	}
+    console.log('weight split count:',boxes.length)
 };
-
-var Box = function() {
-
-    // TODO: memoize all functions beginning with "get_".  Use for-in loop.
-    // get_longest_axis gets called twice now, and others may also.
-
-    var data,                 // it's all about the data
-        box,                  // the bounding box of the data
-        dim,                  // number of dimensions in the data
-
-    init = function( _data ) {
-
-        // Initializes the data values, number of dimensions in the data
-        // (currently fixed to 3 to handle RGB, but may be genericized in
-        // the future), and the bounding box of the data.
-
-        data = _data;
-        dim  = 3; // lock this to 3 (RGB pixels) for now.
-        box  = calculate_bounding_box();
-
-    },
-
-    get_data = function() {
-
-        // Getter for data
-
-        return data;
-
-    },
-
-    sort = function() {
-
-        // Sorts all the elements in this box based on their values on the
-        // longest axis.
-
-        var a           = get_longest_axis().axis,
-            sort_method = get_comparison_func( a );
-
-        data.sort( sort_method );
-
-        return data;
-
-    },
-
-    get_comparison_func = function( _i ) {
-
-        // Return a comparison function based on a given index (for median-cut,
-        // sort on the longest axis) ie: sort ONLY on a single axis.  
-        // get_comparison_func( 1 ) would return a sorting function that sorts
-        // the data according to each item's Green value.
-
-        var sort_method = function( a, b ) {
-            return a[_i] - b[_i];
-        };
-
-        return sort_method;
-
-    },
-
-    split = function() {
-
-        // Splits this box in two and returns two box objects. This function
-        // represents steps 2 and 3 of the algorithm, as written at the top 
-        // of this file.
-
-        sort();
-
-        var med   = mean_pos(),
-            data1 = data.slice( 0, med ),   // elements 0 through med
-            data2 = data.slice( med ),      // elements med through end
-            box1  = Box(),
-            box2  = Box();
-
-        box1.init( data1 );
-        box2.init( data2 );
-
-        return [ box1, box2 ];
-
-    },
-
-    average = function() {
-
-        // Returns the average value of the data in this box
-
-        var avg_r = 0,
-            avg_g = 0,
-            avg_b = 0,
-            i;
-
-        for( i = data.length - 1; i >= 0; --i ) {
-            avg_r += data[i][0];
-            avg_g += data[i][1];
-            avg_b += data[i][2];
-        }
-
-        avg_r /= data.length;
-        avg_g /= data.length;
-        avg_b /= data.length;
-
-        return [ parseInt( avg_r ),
-                 parseInt( avg_g ),
-                 parseInt( avg_b ) ];
-
-    },
-
-    mean_pos = function() {
-
-        // Returns the position of the median value of the data in
-        // this box.  The position number is rounded down, to deal
-        // with cases when the data has an odd number of elements.
-
-        var mean_i,
-            mean = 0,
-            smallest_diff = Number.MAX_VALUE,
-            axis = get_longest_axis().axis,
-            i;
-
-        // sum all the data along the longest axis...
-        for( i = data.length - 1; i >= 0; --i ) { mean += data[i][axis]; }
-        mean /= data.length;
-
-        // find the data point that is closest to the mean
-        for( i = data.length - 1; i >= 0; --i ) {
-            diff = Math.abs( data[i][axis] - mean );
-            if( diff < smallest_diff ) {
-                smallest_diff = diff;
-                mean_i = i;
-            }
-        }
-
-        // return the index of the data point closest to the mean
-
-        return mean_i;
-
-    },
-
-    median_pos = function() {
-
-        // Returns the position of the median value of the data in
-        // this box.  The position number is rounded down, to deal
-        // with cases when the data has an odd number of elements.
-
-        return Math.floor( data.length / 2 );
-
-    },
-
-    get_bounding_box = function() {
-        // Getter for the bounding box
-        return box;
-    },
-
-    calculate_bounding_box = function() {
-
-        // keeps running tally of the min and max values on each dimension
-        // initialize the min value to the highest number possible, and the
-        // max value to the lowest number possible
-
-        var i,
-            minmax = [ { min: Number.MAX_VALUE, max: Number.MIN_VALUE },
-                       { min: Number.MAX_VALUE, max: Number.MIN_VALUE },
-                       { min: Number.MAX_VALUE, max: Number.MIN_VALUE } ];
-
-        for( i = data.length - 1; i >= 0; --i ) {
-
-            minmax[0].min = ( data[i][0] < minmax[0].min ) ? 
-                              data[i][0] : minmax[0].min; // r
-            minmax[1].min = ( data[i][1] < minmax[1].min ) ?
-                              data[i][1] : minmax[1].min; // g
-            minmax[2].min = ( data[i][2] < minmax[2].min ) ?
-                              data[i][2] : minmax[2].min; // b
-
-            minmax[0].max = ( data[i][0] > minmax[0].max ) ?
-                              data[i][0] : minmax[0].max; // r
-            minmax[1].max = ( data[i][1] > minmax[1].max ) ?
-                              data[i][1] : minmax[1].max; // g
-            minmax[2].max = ( data[i][2] > minmax[2].max ) ?
-                              data[i][2] : minmax[2].max; // b
-        }
-
-        return minmax;
-
-    },
-
-    get_longest_axis = function() {
-
-        // Returns the longest (aka "widest") axis of the data in this box.
-
-        var longest_axis = 0,
-            longest_axis_size = 0,
-            i,
-            axis_size;
-
-        for( i = dim - 1; i >= 0; --i ) {
-            axis_size = box[i].max - box[i].min;
-            if( axis_size > longest_axis_size ) {
-                longest_axis      = i;
-                longest_axis_size = axis_size;
-            }
-        }
-
-        return { axis   : longest_axis,
-                 length : longest_axis_size };
-    };
-
-    return {
-
-        /**/ // these are private functions
-        //get_data               : get_data,
-        //median_pos             : median_pos,
-        //get_bounding_box       : get_bounding_box,
-        //calculate_bounding_box : calculate_bounding_box,
-        //sort                   : sort,
-        //get_comparison_func    : get_comparison_func,
-        /**/
-
-        // These are exposed (public) functions
-        mean_pos         : mean_pos,
-        split            : split,
-        get_longest_axis : get_longest_axis,
-        average          : average,
-        init             : init
-    };
-};
+/**
+ * 函数拟合 
+ * @param hitMap 
+ * @param min 可忽略最小颜色数
+ * @param max 最大颜色数,更大就不计数了.
+ * @param pow 指数
+ */
+function buildWeightMap(hitMap,min,max,pow1,pow2){
+	var weightMap = {};
+	//var pow = 1/2;//1/2,1/3,1/4,1/5,1/6...
+	for(var n in hitMap){
+		var v = Math.min(hitMap[n]/max,1); 
+		v = Math.pow(v,pow1);
+		var nv = v<0.5;
+		v = Math.pow(Math.abs(v*2-1),pow2);
+		//[0,2]
+		v = nv ? 1-v : 1+v;
+		v+=1;
+		//[0,1]
+		weightMap[n] = v / 2 
+		//hitMap[n];//
+	}
+	return weightMap;
+}
+//maxLen 如何量化到颜色中去?
+function splitByGap(boxes,gap){
+	var sample = boxes[0].data[0];
+	var dim = sample.length;
+	//console.log(dim,gap)
+	while(dim--){
+		var i=boxes.length;
+		while(i--){
+			var box = boxes[i];
+			splitByAxisGap(box,dim,gap,boxes);
+		}
+	}
+}
+
+function splitByAxisGap(box,axis,gap,result){
+	var data = box.data.sort(function(d1,d2){
+		return d1[axis]-d2[axis]
+	});
+	//console.log(data)
+	var i = data.length;
+	var v1 = data[--i][axis];
+	while(i-->0){
+		var v2 = data[i][axis];
+		//console.log(v2-v1)
+		if(v1-v2>gap){
+			var newData = data.splice(i+1);
+			result.push(new Box(newData,box.palette))
+			v1 = v2;
+		}
+	}
+}
+
+function splitBoxByWeight(box,result){
+	initBoxWeight(box);
+	var maxWeight = box.palette.maxLength;
+	//console.log(box._weight, maxWeight)
+	while(box._weight> maxWeight){
+		var newBox = splitByMaxAxis(box);
+		result.push(newBox);
+		splitBoxByWeight(newBox,result);
+		initBoxWeight(box);
+	}
+}
+function splitByMaxAxis(box){
+	var axis = box._maxAxis
+	// Return a comparison function based on a given index (for median-cut,
+	// sort on the longest axis) ie: sort ONLY on a single axis.  
+	// get_comparison_func( 1 ) would return a sorting function that sorts
+	// the data according to each item's Green value.
+	var data = box.data.sort(function(d1,d2){
+		return d1[axis]-d2[axis]
+	})
+	//var splitPos = getMaxGapPos(data,axis);
+	var splitPos = getMeanPos(data,axis);
+	
+	
+	if(splitPos>0){
+		var newData = data.splice(splitPos);
+		initBoxWeight(box)
+		this._average = null;
+		return new Box(newData,box.palette);
+	}else{
+		console.log(box.data.length,box.data)
+		throw new Error('can not split 0 width axis');
+	}
+}
+function getMeanPos(data,axis) {
+	var len = data.length;
+	if(len>=2){
+		var minDiff = Number.MAX_VALUE;
+		var mean = 0;
+		var i = len;
+		while(i--){mean +=data[i][axis];}
+		mean /=len;
+	    for(i=1;i<len;i++) {
+	    	var v = data[i][axis];
+	        var diff = Math.abs(v - mean );
+	        if( diff < minDiff ) {
+	        	minDiff = diff;
+	            var pos = i;
+	        }
+	    }
+	}
+	//console.log('mean:',mean,[diff,minDiff],len,pos)
+    return pos;
+}
+
+//set: bounding,_longestAxis,_maxLength
+function initBoxWeight(box){
+	var palette = box.palette;
+	var weightMap = palette.weightMap;
+	var data = box.data;
+	var bounding = box.bounding = [];
+	var dim = box.dim = data[0].length;
+	var i = data.length;
+	var di = dim;
+    var tmp = data[--i];
+    var maxWeights = [];
+    var maxWeight = 0;
+    while(di--){
+    	bounding[di] = [tmp[di],tmp[di]]
+    }
+    while(i-->0) {
+    	di = dim;
+    	var d = data[i];
+    	var w = weightMap[d.join(',')];
+    	if(w>=maxWeight){
+    		maxWeights.push(maxWeight = w);
+    	}
+    	while(di--){
+    		tmp = bounding[di];
+    		var v = d[di];
+        	if(v  < tmp[0] ){
+        		tmp[0] = v;
+       		}else if(v  > tmp[1] ){
+        		tmp[1] = v;
+        	}
+    	}
+    }
+    var i = maxWeights.length;
+    var w = maxWeights[--i] ;
+    w += (maxWeights[--i]/2 ||0);
+    w += (maxWeights[--i]/4 ||0);
+    w/=1.75;
+    
+    
+    var di = dim;
+    var axisLength = -1;
+    var axis = -1;
+    while(di--){
+    	var tmp = bounding[di];
+    	var len = tmp[2] = tmp[1]-tmp[0]
+    	if(len>axisLength){
+    		axisLength = len;
+    		axis = di
+    	}
+    }
+    box._maxAxis = axis;
+    box._maxLength = axisLength;
+    //console.log( sw,maxWeights, weightMap)
+    //[min/max]
+    
+    //maxLength & minRate > max ->split
+    //minLength & maxRate > min ->split
+    // -->
+    //weight>max ->split
+    //weight = ??
+    // axisLength > max - (max-min) * rate ==>
+    // axisLength + (max-min)*rate > max
+    box._weight = (axisLength + (palette.maxLength  - palette.minLength) * w)*1;
+    
+}
+
+//function splitByAxisWeight(data,axis,weightMap,result){
+//	var i = data.length;
+//	var t = 0;
+//	var max = weightMap.max;
+//	while(i-->0){
+//		var lab = data[i];
+//		t += weightMap[lab.join(',')]
+//		if(t >= max){
+//			var v = lab[axis];
+//			while(i--){
+//				if(data[i][axis]!=v){
+//					var newData = data.splice(i+1);
+//					result.push(new Box(newData,box.palette));
+//					break;
+//				}
+//			}
+//			
+//		}
+//	}
+//}
+Palette.prototype ={
+	getBox:function(rgb){
+		var lab = ColorSpace.rgb2lab(rgb);
+		var boxes = this.boxes;
+		var i = boxes.length;
+		while(i--){
+			var box = boxes[i];
+			if(box.contains(lab)){
+				return box;
+			}
+		}
+		//console.log(rgb,lab)
+		//console.log(boxes.length)
+	},
+	getValue:function(rgb){
+		var alab = this.getBox(rgb).getAverage();
+		return ColorSpace.lab2rgb(alab)
+	}
+}
+
+function Box(data,palette) {
+	this.data = data;
+	this.palette = palette;
+	//set: bounding,_longestAxis,_maxLength
+	//initBox(this)
+	//console.log(this._maxLength,this+'')
+	//this._average = null;
+}
+
+
+Box.prototype = {
+	getAverage:function(){
+		return this._average || (this._average = toAverage(this.data,this.palette.weightMap))
+	},
+//	getMaxLength : function() {
+//        return this._maxLength;
+//    },
+//	split: function (){
+//		var axis = this._maxAxis
+//		// Return a comparison function based on a given index (for median-cut,
+//		// sort on the longest axis) ie: sort ONLY on a single axis.  
+//		// get_comparison_func( 1 ) would return a sorting function that sorts
+//		// the data according to each item's Green value.
+//		var data = this.data.sort(function(d1,d2){
+//			return d1[axis]-d2[axis]
+//		})
+//		//var splitPos = getMaxGapPos(data,axis);
+//		var splitPos = getMeanPos(data,axis);
+//		
+//		
+//		if(splitPos>0){
+//			var newData = data.splice(splitPos);
+//			initBoxWeight(this)
+//			this._average = null;
+//			return new Box(newData,this);
+//		}
+//	},
+	contains:function(value){
+		if(!this._map){
+			var i = this.data.length;
+			var map = {};
+			while(i--){
+				map[this.data[i]] = true;
+			}
+			this._map = map;
+		}
+		return String(value) in this._map;
+	},
+	toString:function(){
+		return this.data.length;
+		this.contains('');
+		return this._average+':'+this._maxLength+JSON.stringify(Object.keys(this._map))
+	}
+}
+function toAverage(data,weightMap){
+    var i = data.length;
+    var a = 0;
+    var result = [0,0,0];//copy
+    var dim = result.length;
+    while(i--) {
+    	var item = data[i];
+    	var j = dim;
+    	var weight = weightMap[item.join(',')] || 0.001
+    	//console.log(weight)
+    	a += weight;
+    	while(j--){
+    		result[j] = result[j] + item[j] * weight;
+    	}
+    	
+    }
+    while(dim--){
+    	result[dim] = result[dim]/a;
+    }
+    //console.log(data.length,result)
+    return result;
+}
+//function calculateBounding(data,di){
+//    // keeps running tally of the min and max values on each dimension
+//    // initialize the min value to the highest number possible, and the
+//    // max value to the lowest number possible
+//
+//    var i = data.length;
+//    var b = data[--i];
+//    b = [b[di],b[di]]
+//    while(i-->0) {
+//    	var v = data[i][di];
+//        if(v  < b[0] ){
+//        	b[0] = v;
+//        }else if(v  > b[1] ){
+//        	b[1] = v;
+//        }
+//    }
+//    b[2] = b[1]-b[0]
+//    return b;
+//}
+//
+//function getMaxGapPos(data,axis) {
+//	var len = data.length;
+//	if(len>2){
+//		var v1 = data[0][axis];
+//		var v2 = data[1][axis];
+//		//console.log(v1,axis)
+//		var maxGap = Math.abs(v2-v1);
+//		var pos = maxGap && 1;
+//	    for(var i = 2;i<len;i++) {
+//	    	v1 = v2;
+//	    	v2 = data[i][axis]
+//	        var gap = Math.abs(v2 - v1 );
+//	        if( gap > maxGap ) {
+//	            var pos = i;
+//	        }
+//	    }
+//	}
+//	//console.log('gap:',len,pos)
+//    return pos;
+//}
+
+
+
+//    
+//
+//    mean_pos = function() {
+//
+//        // Returns the position of the median value of the data in
+//        // this box.  The position number is rounded down, to deal
+//        // with cases when the data has an odd number of elements.
+//
+//        var mean_i,
+//            mean = 0,
+//            smallest_diff = Number.MAX_VALUE,
+//            axis = get_longest_axis().axis,
+//            i;
+//
+//        // sum all the data along the longest axis...
+//        for( i = data.length - 1; i >= 0; --i ) { mean += data[i][axis]; }
+//        mean /= data.length;
+//
+//        // find the data point that is closest to the mean
+//        for( i = data.length - 1; i >= 0; --i ) {
+//            diff = Math.abs( data[i][axis] - mean );
+//            if( diff < smallest_diff ) {
+//                smallest_diff = diff;
+//                mean_i = i;
+//            }
+//        }
+//
+//        // return the index of the data point closest to the mean
+//
+//        return mean_i;
+//
+//    }
+
+
+if(typeof exports =='object'){
+	exports.Palette = Palette
+}
