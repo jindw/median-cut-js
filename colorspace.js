@@ -65,68 +65,68 @@ function xyz2lab(xyz) {
   return [l, a, b];
 }
 
-//function lab2xyz(lab){
-//	var var_Y = ( lab[0] + 16 ) / 116
-//	var var_X = lab[1] / 500 + var_Y
-//	var var_Z = var_Y - lab[2] / 200
-//
-//	if ( Math.pow(var_Y,3) > 0.008856 ) var_Y = Math.pow(var_Y,3)
-//	else                      var_Y = ( var_Y - 16 / 116 ) / 7.787
-//	if ( Math.pow(var_X,3) > 0.008856 ) var_X = Math.pow(var_X,3)
-//	else                      var_X = ( var_X - 16 / 116 ) / 7.787
-//	if ( Math.pow(var_Z,3) > 0.008856 ) var_Z = Math.pow(var_Z,3)
-//	else                      var_Z = ( var_Z - 16 / 116 ) / 7.787
-//	var ref_X = 95.047;
-//	var ref_Y = 100.000;
-//	var ref_Z = 108.883;
-//	
-//	X = ref_X * var_X     //ref_X =  95.047     Observer= 2°, Illuminant= D65
-//	Y = ref_Y * var_Y     //ref_Y = 100.000
-//	Z = ref_Z * var_Z     //ref_Z = 108.883
-//
-//	return [X,Y,Z]
-//}
-function lab2xyz(lab) {
-  var l = lab[0],
-      a = lab[1],
-      b = lab[2],
-      x, y, z, y2;
+function lab2xyz(lab){
+	var var_Y = ( lab[0] + 16 ) / 116
+	var var_X = lab[1] / 500 + var_Y
+	var var_Z = var_Y - lab[2] / 200
 
-  if (l <= 8) {
-    y = (l * 100) / 903.3;
-    y2 = (7.787 * (y / 100)) + (16 / 116);
-  } else {
-    y = 100 * Math.pow((l + 16) / 116, 3);
-    y2 = Math.pow(y / 100, 1/3);
-  }
+	if ( Math.pow(var_Y,3) > 0.008856 ) var_Y = Math.pow(var_Y,3)
+	else                      var_Y = ( var_Y - 16 / 116 ) / 7.787
+	if ( Math.pow(var_X,3) > 0.008856 ) var_X = Math.pow(var_X,3)
+	else                      var_X = ( var_X - 16 / 116 ) / 7.787
+	if ( Math.pow(var_Z,3) > 0.008856 ) var_Z = Math.pow(var_Z,3)
+	else                      var_Z = ( var_Z - 16 / 116 ) / 7.787
+	var ref_X = 95.047;
+	var ref_Y = 100.000;
+	var ref_Z = 108.883;
+	
+	X = ref_X * var_X     //ref_X =  95.047     Observer= 2°, Illuminant= D65
+	Y = ref_Y * var_Y     //ref_Y = 100.000
+	Z = ref_Z * var_Z     //ref_Z = 108.883
 
-  x = x / 95.047 <= 0.008856 ? x = (95.047 * ((a / 500) + y2 - (16 / 116))) / 7.787 : 95.047 * Math.pow((a / 500) + y2, 3);
-
-  z = z / 108.883 <= 0.008859 ? z = (108.883 * (y2 - (b / 200) - (16 / 116))) / 7.787 : 108.883 * Math.pow(y2 - (b / 200), 3);
-
-  return [x, y, z];
+	return [X,Y,Z]
 }
+//function lab2xyz(lab) {
+//  var l = lab[0],
+//      a = lab[1],
+//      b = lab[2],
+//      x, y, z, y2;
+//
+//  if (l <= 8) {
+//    y = (l * 100) / 903.3;
+//    y2 = (7.787 * (y / 100)) + (16 / 116);
+//  } else {
+//    y = 100 * Math.pow((l + 16) / 116, 3);
+//    y2 = Math.pow(y / 100, 1/3);
+//  }
+//
+//  x = x / 95.047 <= 0.008856 ? x = (95.047 * ((a / 500) + y2 - (16 / 116))) / 7.787 : 95.047 * Math.pow((a / 500) + y2, 3);
+//
+//  z = z / 108.883 <= 0.008859 ? z = (108.883 * (y2 - (b / 200) - (16 / 116))) / 7.787 : 108.883 * Math.pow(y2 - (b / 200), 3);
+//
+//  return [x, y, z];
+//}
 var rgb2labCache = [];
 var lab2rgbCache = [];
 function rgb2lab(rgb){
 	var rgb24 = (rgb[0]<<16) + (rgb[1]<<8) + (rgb[2]);
 	if(rgb24 in rgb2labCache){
-		return rgb2labCache[rgb24];
+		return rgb2labCache[rgb24].slice(0);
 	}else{
 		var xyz = rgb2xyz(rgb);
 		var lab = xyz2lab(xyz);
-		return rgb2labCache[rgb24] = [lab[0],lab[1],lab[2]]
+		return (rgb2labCache[rgb24] = [lab[0],lab[1],lab[2]]).slice(0)
 		//[Math.round(lab[0]),Math.round(lab[1]),Math.round(lab[2])]
 	}
 }
 function lab2rgb(lab){
 	var lab24 = lab.join(',');
 	if(lab24 in lab2rgbCache){
-		return lab2rgbCache[lab24];
+		return lab2rgbCache[lab24].slice(0);
 	}else{
 		var xyz = lab2xyz(lab);
 		var rgb = xyz2rgb(xyz);
-		return lab2rgbCache[lab24] = [formatRgb(rgb[0]),formatRgb(rgb[1]),formatRgb(rgb[2])]
+		return (lab2rgbCache[lab24] = [formatRgb(rgb[0]),formatRgb(rgb[1]),formatRgb(rgb[2])]).slice(0)
 	}
 }
 function formatRgb(v){
@@ -140,4 +140,45 @@ function formatRgb(v){
 if(typeof exports == 'object'){
 exports.rgb2lab = rgb2lab;
 exports.lab2rgb = lab2rgb
+
+var linerAlpha = 16;
+var opacityAlpha = 100;
+exports.rgba2laba = function(rgba){
+	var a = rgba[3]
+	if(a > 254.5){
+		var lab = rgb2lab(rgba);
+		lab[3] = opacityAlpha;
+	}else{
+		var a = a / 255;
+		rgba = [
+			rgba[0] * a + 255 * (1-a),
+			rgba[1] * a + 255 * (1-a),
+			rgba[2] * a + 255 * (1-a),
+		];
+		var lab = rgb2lab(rgba);
+		lab[3] = a * linerAlpha;
+	}
+	return lab;
+	
+		
+}
+exports.laba2rgba = function(laba){
+	var rgba = lab2rgb(laba);
+	var a = laba[3];
+	if(a == 0){
+		return [255,255,255,0]
+	}else if(a + 0.0001 > opacityAlpha){
+		rgba = rgba.concat();
+		rgba[3] = 255;
+	}else{
+		a /= linerAlpha;
+		rgba = [
+			Math.round((rgba[0] - 255 * (1-a))/a),
+			Math.round((rgba[1] - 255 * (1-a))/a),
+			Math.round((rgba[2] - 255 * (1-a))/a),
+			Math.round(a * 255)
+		];
+	}
+	return rgba;
+}
 }

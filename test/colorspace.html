@@ -1,0 +1,24 @@
+<html>
+<script>var exports = window;
+function toRgb(v){
+	if(v.charAt(0) == '#'){
+		return v;
+	}else if(v.charAt(0) == 'r'){
+		return v;
+	}else{
+		var m = v.match(/[+-]?\d+(?:\.\d+)?/g);
+		var rgb = lab2rgb(m);
+		return 'rgb('+rgb.join(',')+')'
+	}
+}
+
+</script>
+<style>
+input{border-width:0 0 0 20px;display:block;}
+</style>
+<script src="../colorspace2.js"></script>
+<body>
+<input onchange="console.log(this.style.color = this.style.borderColor = toRgb(this.value))"/>
+<input onchange="console.log(this.style.color = this.style.borderColor = toRgb(this.value))"/>
+</body>
+</html>
